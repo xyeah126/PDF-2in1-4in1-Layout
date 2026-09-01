@@ -68,22 +68,25 @@ except Exception:
 
 
 def _apply_global_font(root):
-    """全局字体兜底：把 tk 命名字体与 customtkinter 主题默认字体族统一为黑体。
+    """全局字体兜底：tk 命名字体 + customtkinter 主题默认字体，统一黑体加粗。
 
-    所有自定义控件虽已显式传入 SimHei，这里再兜底一次，
-    防止任何内部子元素/弹窗/未来新增控件回退到 Roboto 等英文字体。
+    所有自定义控件虽已显式传入 SimHei bold，这里再兜底一次，
+    防止 SegmentedButton/Scrollbar/弹窗等内部元素回退 Roboto 细体（中文发虚）。
     """
     import tkinter.font as tkfont
     for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont",
                  "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont",
                  "TkIconFont", "TkTooltipFont"):
         try:
-            tkfont.nametofont(name).configure(family=FONT)
+            f = tkfont.nametofont(name)
+            f.configure(family=FONT, weight="bold")
         except Exception:
             pass
-    # customtkinter 无参 CTkFont() 的默认字体族
+    # customtkinter 无参 CTkFont() 读取的主题字体（family/weight 都要覆盖）
     try:
-        ctk.ThemeManager.theme.setdefault("CTkFont", {})["family"] = FONT
+        ct = ctk.ThemeManager.theme.setdefault("CTkFont", {})
+        ct["family"] = FONT
+        ct["weight"] = "bold"
     except Exception:
         pass
 
@@ -124,14 +127,14 @@ class App:
         self._drag_s_px = 0
         self._drag_s_py = 0
 
-        # 字体
+        # 字体：全部黑体加粗（SimHei bold），中文清晰不发虚
         self.f_title  = ctk.CTkFont(family=FONT, size=15, weight="bold")
         self.f_big    = ctk.CTkFont(family=FONT, size=16, weight="bold")
-        self.f_body   = ctk.CTkFont(family=FONT, size=14)
+        self.f_body   = ctk.CTkFont(family=FONT, size=14, weight="bold")
         self.f_body_b = ctk.CTkFont(family=FONT, size=14, weight="bold")
-        self.f_meta   = ctk.CTkFont(family=FONT, size=13)
-        self.f_small  = ctk.CTkFont(family=FONT, size=12)
-        self.f_log    = ctk.CTkFont(family=FONT_MONO, size=12)
+        self.f_meta   = ctk.CTkFont(family=FONT, size=13, weight="bold")
+        self.f_small  = ctk.CTkFont(family=FONT, size=12, weight="bold")
+        self.f_log    = ctk.CTkFont(family=FONT_MONO, size=12, weight="bold")
         self.f_list   = ctk.CTkFont(family=FONT, size=13, weight="bold")
 
         self._build_ui()
@@ -184,15 +187,29 @@ class App:
         self.pan.add(p3, minsize=150)
         self._build_bottom(p3)
 
-        # 首次布局后把分隔条定位到 60%/20%/20%（之后用户可自行拖拽）
+        # 首次布局后把分隔条定位到 55%/25%/20%（预览/中部三卡/日志+导出）
+        # 之后用户可自行拖拽；连设两次防止布局未稳定时失效
         root.after(300, self._set_sashes)
+        root.after(900, self._set_sashes)
 
     def _set_sashes(self):
+        """定位分隔条到 55%/25%/20%。
+
+        注意 tkinter 方法名随版本不同：
+        Py3.14+ 为 sash_place(index,x,y)，旧版为 sashpos(index,y)。
+        之前调用不存在的 sashpos 会抛 AttributeError 被吞掉，导致三栏均分。
+        """
         try:
             total = self.pan.winfo_height()
-            if total > 100:
-                self.pan.sashpos(0, int(total * 0.60))
-                self.pan.sashpos(1, int(total * 0.80))
+            if total <= 100:
+                return
+            y0, y1 = int(total * 0.55), int(total * 0.80)
+            if hasattr(self.pan, "sash_place"):          # 垂直方向：x=0，y 定位
+                self.pan.sash_place(0, 0, y0)
+                self.pan.sash_place(1, 0, y1)
+            else:
+                self.pan.sashpos(0, y0)
+                self.pan.sashpos(1, y1)
         except Exception:
             pass
 
@@ -250,7 +267,7 @@ class App:
                 self.dnd_enabled = False
         # 占位文字
         self.prev_canvas.create_text(0, 0, text="（无文件）", tags="__placeholder__",
-                                     fill="#94A3B8", font=(FONT, 14))
+                                     fill="#94A3B8", font=(FONT, 14, "bold"))
 
     # ----- 中部：输入文件 / 合并设置 / 页间距 -----
     def _build_controls(self, parent):
@@ -458,7 +475,7 @@ class App:
         pw = cv.winfo_width() or 100
         ph = cv.winfo_height() or 100
         cv.create_text(int(pw / 2), int(ph / 2), text=text,
-                       fill="#94A3B8", font=(FONT, 14))
+                       fill="#94A3B8", font=(FONT, 14, "bold"))
 
     # ================= 配置读取 =================
     def _mode_int(self) -> int:
@@ -485,9 +502,13 @@ class App:
     def _update_meta(self):
         cfg = validate(self._cfg())
         rows, cols = grid_rc(cfg)
+        cap = rows * cols
+        n = len(self.files)
+        pages = max(1, (n + cap - 1) // cap) if n else 0
+        page_txt = f" · 共 {pages} 页" if pages > 1 else ""
         self.meta_var.set(
             f"{cfg.mode}合1 · {cfg.page_size} {cfg.orientation} · {rows}×{cols} · "
-            f"间距 {cfg.gap_h_mm:.0f}/{cfg.gap_v_mm:.0f}mm"
+            f"间距 {cfg.gap_h_mm:.0f}/{cfg.gap_v_mm:.0f}mm · {n} 个文件{page_txt}"
         )
 
     def _apply_config(self, cfg: MergeConfig):
@@ -539,27 +560,43 @@ class App:
         self.root.destroy()
 
     # ================= 文件列表 =================
+    def _update_list_scrollbar(self):
+        """文件 ≤5 个时隐藏右侧滚动条（内容本就不需要滚动），更多时恢复。"""
+        sb = getattr(self.file_box, "_scrollbar", None)
+        if sb is None:
+            return
+        try:
+            if len(self.files) <= 5:
+                sb.grid_remove()
+            elif not sb.winfo_ismapped():
+                # 恢复 CTkScrollableFrame 内部垂直滚动条的原始 grid 位
+                sb.grid(row=1, column=1, sticky="nsew", padx=3, pady=3)
+        except Exception:
+            pass
+
     def _render_files(self):
         for w in self.file_box.winfo_children():
             w.destroy()
         if not self.files:
             ctk.CTkLabel(self.file_box, text="（无文件）", text_color=("black", "black"),
                          font=self.f_body).pack(pady=8)
-            return
-        for i, p in enumerate(self.files):
-            title = f"{i + 1}. {os.path.basename(p)}"
-            selected = (i == self.sel)
-            bg = ("#BFDBFE", "#2563EB") if selected else "transparent"
-            tc = "black"  # 列表文字常亮黑
-            btn = ctk.CTkButton(
-                self.file_box, text=title, anchor="w", height=28,
-                font=self.f_list,
-                fg_color=bg,
-                text_color=(tc, tc),
-                hover_color=("#DBEAFE", "#1D4ED8"),
-                command=lambda i=i: self._select(i),
-            )
-            btn.pack(fill="x", pady=2)
+        else:
+            for i, p in enumerate(self.files):
+                title = f"{i + 1}. {os.path.basename(p)}"
+                selected = (i == self.sel)
+                bg = ("#BFDBFE", "#2563EB") if selected else "transparent"
+                tc = "black"  # 列表文字常亮黑
+                btn = ctk.CTkButton(
+                    self.file_box, text=title, anchor="w", height=28,
+                    font=self.f_list,
+                    fg_color=bg,
+                    text_color=(tc, tc),
+                    hover_color=("#DBEAFE", "#1D4ED8"),
+                    command=lambda i=i: self._select(i),
+                )
+                btn.pack(fill="x", pady=2)
+        self._update_list_scrollbar()
+        self._update_meta()
 
     def _select(self, i):
         self.sel = i
@@ -668,8 +705,16 @@ class App:
             tb = traceback.format_exc(limit=4)
             self._log(f"预览渲染失败: {e}\n{tb}", "error")
 
-    def _h_done(self, path):
-        self._log(f"导出完成: {path}", "ok")
+    def _h_done(self, paths):
+        if isinstance(paths, (list, tuple)):
+            if len(paths) == 1:
+                self._log(f"导出完成: {paths[0]}", "ok")
+            else:
+                self._log(f"导出完成：共 {len(paths)} 个文件 → {os.path.dirname(paths[0])}", "ok")
+                for p in paths:
+                    self._log(f"  · {os.path.basename(p)}", "ok")
+        else:
+            self._log(f"导出完成: {paths}", "ok")
 
     def _h_error(self, msg):
         self._log(msg, "error")

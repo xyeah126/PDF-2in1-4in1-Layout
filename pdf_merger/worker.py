@@ -41,11 +41,11 @@ class Worker:
                 self.bus.log(f"开始导出 {cfg.export_format.upper()} → {out_path}")
                 doc = build_merged(files, cfg, log=self.bus.log)
                 try:
-                    export(doc, out_path, cfg)
+                    paths = export(doc, out_path, cfg)
                 finally:
                     doc.close()
                 if tid == self._tid:
-                    self.bus.done(out_path)
+                    self.bus.done(paths)
             except Exception as e:
                 self.bus.error(f"导出失败: {e}")
 

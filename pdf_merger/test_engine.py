@@ -77,6 +77,115 @@ def test_preview_is_png(single_pages):
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+# ---------- 多页输出（超出单页容量自动翻页） ----------
+@pytest.mark.parametrize("mode,nfiles,expect_pages", [
+    (2, 3, 2),    # 用户场景：3 个文件 + 2合1 → 2 页
+    (2, 5, 3),
+    (4, 5, 2),
+    (4, 8, 2),
+    (6, 7, 2),
+    (6, 8, 2),
+    (8, 8, 1),
+])
+def test_merge_multipage(single_pages, mode, nfiles, expect_pages):
+    cfg = validate(MergeConfig(mode=mode, orientation="横向"))
+    doc = build_merged(single_pages[:nfiles], cfg)
+    try:
+        assert doc.page_count == expect_pages
+        # 每一页都必须非空白（最后一页不足 cap 也要有内容）
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(0.3, 0.3))
+            colors = {bytes(pix.samples[i:i + 3]) for i in range(0, len(pix.samples), 9)}
+            assert len(colors) > 5
+    finally:
+        doc.close()
+
+
+def test_merge_multipage_second_page_layout(single_pages):
+    """3 文件 + 2合1：第1页 2 个槽位都有内容，第2页第1个槽位有、第2个槽位空白。"""
+    cfg = validate(MergeConfig(mode=2, orientation="横向"))
+    doc = build_merged(single_pages[:3], cfg)
+    try:
+        assert doc.page_count == 2
+        pw, ph = page_size_pt(cfg)
+        from pdf_engine import cell_rect
+        # 第2页：槽位0 区域非白，槽位1 区域近似全白
+        p2 = doc[1]
+        pix = p2.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+
+        def cell_nonwhite(cell):
+            x0, y0, x1, y1 = (int(v) for v in (cell.x0, cell.y0, cell.x1, cell.y1))
+            cnt = 0
+            for y in range(max(0, y0), min(pix.height, y1), 4):
+                for x in range(max(0, x0), min(pix.width, x1), 4):
+                    r, g, b = pix.pixel(x, y)
+                    if r < 240 or g < 240 or b < 240:
+                        cnt += 1
+            return cnt
+
+        assert cell_nonwhite(cell_rect(0, cfg, pw, ph)) > 5     # 第3个文件在槽位0
+        assert cell_nonwhite(cell_rect(1, cfg, pw, ph)) < 5     # 槽位1 空白
+    finally:
+        doc.close()
+
+
+def test_preview_multipage_is_tall_png(single_pages):
+    cfg = validate(MergeConfig(mode=2, orientation="横向"))
+    png = render_preview(single_pages[:3], cfg, target_w=400)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    from PIL import Image
+    import io as _io
+    im = Image.open(_io.BytesIO(png))
+    # 两页横向 A4 纵向拼接：高度明显大于宽度
+    assert im.height > im.width * 1.4
+
+
+def test_export_pdf_multipage(single_pages, tmp_path):
+    cfg = validate(MergeConfig(mode=2, orientation="横向", export_format="pdf"))
+    doc = build_merged(single_pages[:3], cfg)
+    out = tmp_path / "m.pdf"
+    try:
+        paths = export(doc, str(out), cfg)
+    finally:
+        doc.close()
+    assert paths == [str(out)]
+    check = fitz.open(str(out))
+    try:
+        assert check.page_count == 2
+    finally:
+        check.close()
+
+
+@pytest.mark.parametrize("fmt", ["jpg", "png"])
+def test_export_images_multipage(single_pages, tmp_path, fmt):
+    cfg = validate(MergeConfig(mode=2, orientation="横向",
+                               export_format=fmt, dpi=100))
+    doc = build_merged(single_pages[:3], cfg)
+    out = tmp_path / f"m.{fmt}"
+    try:
+        paths = export(doc, str(out), cfg)
+    finally:
+        doc.close()
+    # 多页 → 两张带页码后缀的图，单页时才用原名
+    assert len(paths) == 2
+    assert (tmp_path / f"m_p1.{fmt}").exists()
+    assert (tmp_path / f"m_p2.{fmt}").exists()
+    assert not out.exists()
+
+
+def test_export_image_singlepage_keeps_name(single_pages, tmp_path):
+    """单页导出图片不加页码后缀，兼容旧行为。"""
+    cfg = validate(MergeConfig(mode=2, orientation="横向",
+                               export_format="png", dpi=100))
+    doc = build_merged(single_pages[:2], cfg)
+    out = tmp_path / "one.png"
+    try:
+        paths = export(doc, str(out), cfg)
+    finally:
+        doc.close()
+    assert paths == [str(out)] and out.exists()
+
+
 def test_merged_non_blank(single_pages):
     """确认 show_pdf_page 真把源页贴进网格，非空白。"""
     cfg = validate(MergeConfig(mode=4, orientation="横向"))

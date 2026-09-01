@@ -49,11 +49,15 @@ class App:
         self._prev_image = None
 
         self._build_ui()
+        # 记住上次设置：启动载入配置与文件列表
+        saved_cfg, saved_files = persistence.load()
+        if saved_cfg:
+            self._apply_config(saved_cfg)
+        if saved_files:
+            self.files = saved_files
+            self.sel = len(self.files) - 1
+            self._log(f"已恢复 {len(self.files)} 个文件")
         self._render_files()
-        # 记住上次设置：启动载入
-        saved = persistence.load()
-        if saved:
-            self._apply_config(saved)
         self._update_meta()
         # 关闭时保存
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -274,13 +278,13 @@ class App:
     def _do_save(self):
         """防抖落盘：配置变更 600ms 后静默保存。"""
         self._save_id = None
-        persistence.save(self._cfg())
+        persistence.save(self._cfg(), self.files)
 
     def _on_close(self):
         """关闭窗口：保存配置后销毁。"""
         if self._save_id:
             self.root.after_cancel(self._save_id)
-        persistence.save(self._cfg())
+        persistence.save(self._cfg(), self.files)
         self.root.destroy()
 
     # ========== 文件列表 ==========

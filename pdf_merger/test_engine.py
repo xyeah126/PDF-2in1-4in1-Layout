@@ -109,3 +109,33 @@ def test_fit_preserves_aspect_and_centers():
     assert abs(r.height - 50) < 0.01
     assert abs(r.x0 - 0) < 0.01
     assert abs(r.y0 - 25) < 0.01
+
+
+# ---------- 持久化 ----------
+import os
+import persistence
+
+
+def test_persistence_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(persistence, "config_path",
+                        lambda: str(tmp_path / "cfg.json"))
+    orig = validate(MergeConfig(mode=6, page_size="A3", orientation="纵向",
+                                gap_h_mm=12, dpi=300, export_format="png"))
+    files = [str(tmp_path / "a.pdf"), str(tmp_path / "b.pdf")]
+    for f in files:
+        tmp_path.joinpath(os.path.basename(f)).write_bytes(b"%PDF-1.4")
+    persistence.save(orig, files)
+    cfg, loaded = persistence.load()
+    assert cfg is not None
+    assert cfg.mode == 6 and cfg.page_size == "A3" and cfg.dpi == 300
+    assert loaded == files
+
+
+def test_persistence_drops_missing_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(persistence, "config_path",
+                        lambda: str(tmp_path / "cfg.json"))
+    files = [str(tmp_path / "a.pdf"), str(tmp_path / "gone.pdf")]
+    tmp_path.joinpath("a.pdf").write_bytes(b"%PDF-1.4")
+    persistence.save(MergeConfig(), files)
+    _, loaded = persistence.load()
+    assert loaded == [str(tmp_path / "a.pdf")]

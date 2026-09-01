@@ -1,14 +1,19 @@
-"""engine 真实合并/预览/导出测试（无需 GUI）。"""
-import os
-import tempfile
-import pymupdf as fitz  # noqa
+"""engine 的 pytest 测试套件。
+
+运行：cd pdf_merger && pytest -q
+"""
+import pytest
+import pymupdf as fitz
 
 from config import MergeConfig, validate
-from pdf_engine import build_merged, render_preview, export, grid_rc, page_size_pt
+from pdf_engine import (
+    build_merged, render_preview, export,
+    grid_rc, page_size_pt, _fit,
+)
 
 
-def make_single_page(path, label, size=(595, 842)):
-    """生成一个单页 PDF，画一个矩形和文字标识。"""
+def _make_single_page(path: str, label: str, size=(595, 842)) -> None:
+    """生成一个带边框与文字的单页 PDF。"""
     doc = fitz.open()
     page = doc.new_page(width=size[0], height=size[1])
     page.draw_rect(fitz.Rect(20, 20, size[0] - 20, size[1] - 20),
@@ -19,58 +24,88 @@ def make_single_page(path, label, size=(595, 842)):
     doc.close()
 
 
-def main():
-    tmp = tempfile.mkdtemp(prefix="pdfmerge_")
-    print("tmp:", tmp)
-
-    files = []
-    for i in range(4):
-        p = os.path.join(tmp, f"p{i + 1}.pdf")
-        make_single_page(p, f"PAGE {i + 1}")
-        files.append(p)
-
-    results = []
-    for mode in (2, 4, 6, 8):
-        for ori in ("横向", "纵向"):
-            cfg = validate(MergeConfig(mode=mode, orientation=ori,
-                                        gap_h_mm=5, gap_v_mm=5, margin_mm=5))
-            pw, ph = page_size_pt(cfg)
-            rows, cols = grid_rc(cfg)
-
-            doc = build_merged(files, cfg)
-            assert doc.page_count == 1, f"{mode}/{ori} 应输出单页"
-            page = doc[0]
-            w, h = page.rect.width, page.rect.height
-            assert abs(w - pw) < 0.1 and abs(h - ph) < 0.1, \
-                f"{mode}/{ori} 页面尺寸 {w:.1f}x{h:.1f} != {pw:.1f}x{ph:.1f}"
-
-            out_pdf = os.path.join(tmp, f"out_{mode}{ori}.pdf")
-            export(doc, out_pdf, MergeConfig(export_format="pdf"))
-            doc.close()
-
-            # 预览 png
-            png = render_preview(files, cfg, target_w=480)
-            assert png[:8] == b"\x89PNG\r\n\x1a\n", "preview 非 PNG"
-
-            # jpg / png 导出
-            for fmt in ("jpg", "png"):
-                out = os.path.join(tmp, f"out_{mode}{ori}.{fmt}")
-                d2 = build_merged(files, cfg)
-                export(d2, out, MergeConfig(export_format=fmt, dpi=150))
-                d2.close()
-                sz = os.path.getsize(out)
-                assert sz > 0, f"{fmt} 空文件"
-
-            results.append((f"{mode}合1 {ori}", f"{rows}x{cols}",
-                            f"{w:.0f}x{h:.0f}pt",
-                            f"pdf={os.path.getsize(out_pdf)}B png={len(png)}B"))
-
-    print("\nmode/方向      网格   输出页尺寸      产物")
-    print("-" * 60)
-    for r in results:
-        print(f"{r[0]:<12} {r[1]:<6} {r[2]:<14} {r[3]}")
-    print(f"\n全部通过：{len(results)} 组配置 × (pdf/jpg/png) 导出无误")
+@pytest.fixture(scope="session")
+def single_pages(tmp_path_factory):
+    """8 个单页 PDF，足够覆盖 8 合1。"""
+    d = tmp_path_factory.mktemp("pages")
+    paths = []
+    for i in range(8):
+        p = d / f"p{i + 1}.pdf"
+        _make_single_page(str(p), f"PAGE {i + 1}")
+        paths.append(str(p))
+    return paths
 
 
-if __name__ == "__main__":
-    main()
+# ---------- 布局正确性 ----------
+@pytest.mark.parametrize("mode", [2, 4, 6, 8])
+@pytest.mark.parametrize("ori", ["横向", "纵向"])
+def test_merge_layout(single_pages, mode, ori):
+    cfg = validate(MergeConfig(mode=mode, orientation=ori))
+    rows, cols = grid_rc(cfg)
+    assert rows * cols == mode
+
+    doc = build_merged(single_pages[:mode], cfg)
+    try:
+        assert doc.page_count == 1
+        pw, ph = page_size_pt(cfg)
+        page = doc[0]
+        assert abs(page.rect.width - pw) < 0.1
+        assert abs(page.rect.height - ph) < 0.1
+    finally:
+        doc.close()
+
+
+# ---------- 导出格式 ----------
+@pytest.mark.parametrize("mode", [2, 4, 6, 8])
+@pytest.mark.parametrize("fmt", ["pdf", "jpg", "png"])
+def test_export_formats(single_pages, tmp_path, mode, fmt):
+    cfg = validate(MergeConfig(mode=mode, orientation="横向",
+                               export_format=fmt, dpi=150))
+    doc = build_merged(single_pages[:mode], cfg)
+    out = tmp_path / f"out.{fmt}"
+    try:
+        export(doc, str(out), cfg)
+    finally:
+        doc.close()
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_preview_is_png(single_pages):
+    cfg = validate(MergeConfig(mode=4))
+    png = render_preview(single_pages[:4], cfg, target_w=400)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_merged_non_blank(single_pages):
+    """确认 show_pdf_page 真把源页贴进网格，非空白。"""
+    cfg = validate(MergeConfig(mode=4, orientation="横向"))
+    doc = build_merged(single_pages[:4], cfg)
+    try:
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.3, 0.3))
+        colors = {bytes(pix.samples[i:i + 3]) for i in range(0, len(pix.samples), 9)}
+        assert len(colors) > 5
+    finally:
+        doc.close()
+
+
+# ---------- 单元：校验与居中 ----------
+def test_validate_clamps():
+    bad = MergeConfig(mode=99, page_size="A0", orientation="斜",
+                      gap_h_mm=-5, dpi=99999)
+    c = validate(bad)
+    assert c.mode == 4
+    assert c.page_size == "A4"
+    assert c.orientation == "横向"
+    assert c.gap_h_mm == 0
+    assert c.dpi == 600
+
+
+def test_fit_preserves_aspect_and_centers():
+    src = fitz.Rect(0, 0, 100, 50)   # 2:1
+    cell = fitz.Rect(0, 0, 100, 100)
+    r = _fit(src, cell)
+    assert abs(r.width - 100) < 0.01
+    assert abs(r.height - 50) < 0.01
+    assert abs(r.x0 - 0) < 0.01
+    assert abs(r.y0 - 25) < 0.01

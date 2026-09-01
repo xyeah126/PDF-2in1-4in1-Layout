@@ -14,6 +14,7 @@ from PIL import Image
 from config import MergeConfig, validate, grid_rc
 from bus import Bus
 from worker import Worker
+import persistence
 
 # 预览显示区上限（像素），真实窗口可更大
 PREVIEW_W, PREVIEW_H = 520, 360
@@ -44,11 +45,18 @@ class App:
         self.files: list[str] = []
         self.sel = -1
         self._deb = None
+        self._save_id = None
         self._prev_image = None
 
         self._build_ui()
         self._render_files()
+        # 记住上次设置：启动载入
+        saved = persistence.load()
+        if saved:
+            self._apply_config(saved)
         self._update_meta()
+        # 关闭时保存
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.bus.start(root, {
             "log": self._h_log,
@@ -228,12 +236,29 @@ class App:
             f"间距 {cfg.gap_h_mm:.0f}/{cfg.gap_v_mm:.0f}mm"
         )
 
+    def _apply_config(self, cfg: MergeConfig):
+        """把保存的配置回填到控件。"""
+        self.mode_seg.set(f"{cfg.mode}合1")
+        self.page_seg.set(cfg.page_size)
+        self.ori_seg.set(cfg.orientation)
+        self.fmt_seg.set(cfg.export_format.upper())
+        for ent, val in ((self.dpi_ent, cfg.dpi),
+                         (self.gap_h, cfg.gap_h_mm),
+                         (self.gap_v, cfg.gap_v_mm),
+                         (self.margin, cfg.margin_mm)):
+            ent.delete(0, "end")
+            ent.insert(0, f"{val:g}")
+
     # ========== 事件：配置变更 → 防抖预览 ==========
     def _on_cfg(self, _=None):
         self._update_meta()
         if self._deb:
             self.root.after_cancel(self._deb)
         self._deb = self.root.after(300, self._trigger_preview)
+        # 记住上次设置：防抖保存
+        if self._save_id:
+            self.root.after_cancel(self._save_id)
+        self._save_id = self.root.after(600, self._do_save)
 
     def _trigger_preview(self):
         self._deb = None
@@ -245,6 +270,18 @@ class App:
     def _clear_preview(self):
         self.preview_label.configure(image=None, text="（无文件）", text_color="gray")
         self._prev_image = None
+
+    def _do_save(self):
+        """防抖落盘：配置变更 600ms 后静默保存。"""
+        self._save_id = None
+        persistence.save(self._cfg())
+
+    def _on_close(self):
+        """关闭窗口：保存配置后销毁。"""
+        if self._save_id:
+            self.root.after_cancel(self._save_id)
+        persistence.save(self._cfg())
+        self.root.destroy()
 
     # ========== 文件列表 ==========
     def _render_files(self):

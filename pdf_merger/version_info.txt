@@ -14,14 +14,14 @@ VSVersionInfo(
   kids = [
     StringFileInfo([
       StringTable('080404b0', [
-        StringEntry('CompanyName', ''),
-        StringEntry('FileDescription', 'PDF 单页合并器'),
-        StringEntry('FileVersion', '0.6.0.0'),
-        StringEntry('InternalName', 'PDFMerger'),
-        StringEntry('LegalCopyright', ''),
-        StringEntry('OriginalFilename', 'PDFMerger.exe'),
-        StringEntry('ProductName', 'PDF 单页合并器'),
-        StringEntry('ProductVersion', '0.6.0.0'),
+        StringStruct('CompanyName', ''),
+        StringStruct('FileDescription', 'PDF 单页合并器'),
+        StringStruct('FileVersion', '0.6.0.0'),
+        StringStruct('InternalName', 'PDFMerger'),
+        StringStruct('LegalCopyright', ''),
+        StringStruct('OriginalFilename', 'PDFMerger.exe'),
+        StringStruct('ProductName', 'PDF 单页合并器'),
+        StringStruct('ProductVersion', '0.6.0.0'),
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [0x0804, 1200])])

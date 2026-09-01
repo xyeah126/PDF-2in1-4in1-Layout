@@ -15,6 +15,7 @@ from config import MergeConfig, validate
 from pdf_engine import grid_rc
 from bus import Bus
 from worker import Worker
+from version import VERSION
 import persistence
 
 # 预览显示区上限（像素），真实窗口可更大
@@ -75,7 +76,7 @@ class App:
     # ========== UI 构建 ==========
     def _build_ui(self):
         root = self.root
-        root.title("PDF 单页合并器")
+        root.title(f"PDF 单页合并器 v{VERSION}")
         root.geometry("980x740")
         root.minsize(820, 620)
 
@@ -185,7 +186,9 @@ class App:
                      font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
         self.fmt_seg = self._seg_row(ec, "格式", ["PDF", "JPG", "PNG"], "PDF")
         ctk.CTkButton(ec, text="另存为…", height=30,
-                      command=self._save_as).pack(fill="x", padx=10, pady=(10, 10))
+                      command=self._save_as).pack(fill="x", padx=10, pady=(10, 4))
+        ctk.CTkLabel(ec, text=f"v{VERSION}", text_color="gray",
+                     font=ctk.CTkFont(size=11)).pack(pady=(0, 10))
 
     # ---------- 通用行组件 ----------
     def _seg_row(self, parent, label, values, default, command=None):

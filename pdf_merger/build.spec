@@ -41,5 +41,6 @@ exe = EXE(
     onefile=True,
     windowed=True,        # 无控制台窗口
     upx=True,
-    # icon="app.ico",     # 放入 app.ico 后取消注释
+    icon="app.ico",                 # 应用图标
+    version="version_info.txt",     # exe 属性显示 0.6.0.0
 )

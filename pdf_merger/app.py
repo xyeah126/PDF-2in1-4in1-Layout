@@ -11,7 +11,8 @@ import datetime
 import customtkinter as ctk
 from PIL import Image
 
-from config import MergeConfig, validate, grid_rc
+from config import MergeConfig, validate
+from pdf_engine import grid_rc
 from bus import Bus
 from worker import Worker
 import persistence

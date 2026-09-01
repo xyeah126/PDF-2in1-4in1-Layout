@@ -24,9 +24,9 @@ from worker import Worker
 from version import VERSION
 import persistence
 
-# ===== 字体 =====
-FONT = "Microsoft YaHei"          # 微软雅黑
-FONT_MONO = "Consolas"            # 日志用清晰等宽字体
+# ===== 字体：全局统一黑体 =====
+FONT = "SimHei"                    # 黑体（中文清晰、统一）
+FONT_MONO = "SimHei"               # 日志同样用黑体，避免中文回退英文体
 
 # ===== 预览区（像素），真实窗口可更大 =====
 PREVIEW_W, PREVIEW_H = 580, 400
@@ -67,6 +67,27 @@ except Exception:
     pass
 
 
+def _apply_global_font(root):
+    """全局字体兜底：把 tk 命名字体与 customtkinter 主题默认字体族统一为黑体。
+
+    所有自定义控件虽已显式传入 SimHei，这里再兜底一次，
+    防止任何内部子元素/弹窗/未来新增控件回退到 Roboto 等英文字体。
+    """
+    import tkinter.font as tkfont
+    for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont",
+                 "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont",
+                 "TkIconFont", "TkTooltipFont"):
+        try:
+            tkfont.nametofont(name).configure(family=FONT)
+        except Exception:
+            pass
+    # customtkinter 无参 CTkFont() 的默认字体族
+    try:
+        ctk.ThemeManager.theme.setdefault("CTkFont", {})["family"] = FONT
+    except Exception:
+        pass
+
+
 def _default_dir() -> str:
     """默认目录：打包态指 exe 所在目录，开发态指脚本目录。"""
     if getattr(sys, "frozen", False):
@@ -81,6 +102,7 @@ def _ori_short(ori: str) -> str:
 class App:
     def __init__(self, root, dnd_enabled: bool = False):
         self.root = root
+        _apply_global_font(root)   # 全局字体兜底：统一黑体
         self.dnd_enabled = dnd_enabled and DND_ENABLED
         self.bus = Bus()
         self.worker = Worker(self.bus)
@@ -138,29 +160,41 @@ class App:
     def _build_ui(self):
         root = self.root
         root.title(f"PDF 单页合并器 v{VERSION}")
-        root.geometry("1060x800")
-        root.minsize(940, 720)
+        root.geometry("1240x940")
+        root.minsize(1120, 840)
 
-        # 主体：tk.PanedWindow（可拖拽分隔条，双箭头光标）
-        pan = tk.PanedWindow(root, orient="vertical", sashwidth=6,
-                             sashrelief="flat", bg="#E2E8F0",
-                             handlesize=10, opaqueresize=False)
-        pan.pack(fill="both", expand=True, padx=10, pady=10)
+        # 主体：tk.PanedWindow（可拖拽分隔条，悬停双箭头）
+        self.pan = tk.PanedWindow(root, orient="vertical", sashwidth=6,
+                                  sashrelief="flat", bg="#E2E8F0",
+                                  handlesize=10, opaqueresize=False)
+        self.pan.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Pane 1：预览
-        p1 = ctk.CTkFrame(pan, fg_color="transparent")
-        pan.add(p1, minsize=220)
+        # Pane 1：预览（60%）
+        p1 = ctk.CTkFrame(self.pan, fg_color="transparent")
+        self.pan.add(p1, minsize=300)
         self._build_preview(p1)
 
-        # Pane 2：中部三卡
-        p2 = ctk.CTkFrame(pan, fg_color="transparent")
-        pan.add(p2, minsize=200)
+        # Pane 2：中部三卡（20%）
+        p2 = ctk.CTkFrame(self.pan, fg_color="transparent")
+        self.pan.add(p2, minsize=170)
         self._build_controls(p2)
 
-        # Pane 3：底部日志 + 导出
-        p3 = ctk.CTkFrame(pan, fg_color="transparent")
-        pan.add(p3, minsize=180)
+        # Pane 3：底部日志 + 导出（20%）
+        p3 = ctk.CTkFrame(self.pan, fg_color="transparent")
+        self.pan.add(p3, minsize=150)
         self._build_bottom(p3)
+
+        # 首次布局后把分隔条定位到 60%/20%/20%（之后用户可自行拖拽）
+        root.after(300, self._set_sashes)
+
+    def _set_sashes(self):
+        try:
+            total = self.pan.winfo_height()
+            if total > 100:
+                self.pan.sashpos(0, int(total * 0.60))
+                self.pan.sashpos(1, int(total * 0.80))
+        except Exception:
+            pass
 
     def _card(self, parent, **kw):
         """统一卡片：白底 + 14 圆角 + 轻边。"""
@@ -204,6 +238,10 @@ class App:
         self.prev_canvas.bind("<B1-Motion>", self._pan_drag)
         self.prev_canvas.bind("<ButtonRelease-1>", self._pan_end)
         self.prev_canvas.bind("<Configure>", lambda e: self._apply_preview())
+        # 滚轮缩放：Windows/macOS 为 <MouseWheel>（delta±120），Linux 为 Button-4/5
+        self.prev_canvas.bind("<MouseWheel>", self._on_wheel)
+        self.prev_canvas.bind("<Button-4>", lambda e: self._wheel_zoom(1))
+        self.prev_canvas.bind("<Button-5>", lambda e: self._wheel_zoom(-1))
         if self.dnd_enabled:
             try:
                 self.prev_canvas.drop_target_register(DND_FILES)
@@ -223,20 +261,21 @@ class App:
         f.grid_columnconfigure(2, weight=1)
         f.grid_rowconfigure(0, weight=1)
 
-        # 输入文件卡：淡蓝列表 + 5 分色等宽按钮
+        # 输入文件卡：左右布局 —— 左列表（淡蓝底），右侧竖排 5 个分色按钮
         c1 = self._card(f)
         c1.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        c1.grid_columnconfigure(0, weight=1)
+        c1.grid_columnconfigure(0, weight=1)   # 列表列吃满宽度
+        c1.grid_rowconfigure(1, weight=1)      # 列表行吃满高度
         ctk.CTkLabel(c1, text="输入文件（单页 PDF）", font=self.f_title).grid(
-            row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+            row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 6))
 
-        # 列表：淡蓝底 + 固定高度
-        self.file_box = ctk.CTkScrollableFrame(c1, height=110, fg_color=C_LIST_BG)
-        self.file_box.grid(row=1, column=0, sticky="ew", padx=12)
+        # 列表：淡蓝底
+        self.file_box = ctk.CTkScrollableFrame(c1, height=120, fg_color=C_LIST_BG)
+        self.file_box.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(0, 12))
 
-        # 工具栏：5 个按钮同宽同色不同色
+        # 右侧竖排按钮列
         tb = ctk.CTkFrame(c1, fg_color="transparent")
-        tb.grid(row=2, column=0, sticky="ew", padx=12, pady=(10, 12))
+        tb.grid(row=1, column=1, sticky="ns", padx=(0, 12), pady=(0, 12))
         btns = [
             ("↑ 上移",   lambda: self._move(-1), C_UP),
             ("↓ 下移",   lambda: self._move(1),  C_DN),
@@ -245,11 +284,9 @@ class App:
             ("＋ 添加",  self._add_files,        C_ADD),
         ]
         for i, (txt, cmd, col_) in enumerate(btns):
-            tb.grid_columnconfigure(i, weight=1)
-            ctk.CTkButton(tb, text=txt, height=32, font=self.f_body_b,
+            ctk.CTkButton(tb, text=txt, width=92, height=30, font=self.f_body_b,
                           fg_color=col_, hover_color=col_[1],
-                          command=cmd).grid(row=0, column=i, sticky="ew",
-                                             padx=(0 if i == 0 else 4, 0 if i == len(btns) - 1 else 4))
+                          command=cmd).pack(fill="x", pady=3)
 
         # 合并设置
         c2 = self._card(f)
@@ -292,10 +329,10 @@ class App:
         ec.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         ctk.CTkLabel(ec, text="导出", font=self.f_title).pack(anchor="w", padx=12, pady=(12, 6))
         self.fmt_seg = self._seg_row(ec, "格式", ["PDF", "JPG", "PNG"], "PDF")
-        # 另存为：收窄、与格式按钮左对齐（不 pad 填满）
-        ctk.CTkButton(ec, text="另存为…", width=120, height=34, font=self.f_body_b,
+        # 另存为：靠右对齐
+        ctk.CTkButton(ec, text="另存为…", width=130, height=34, font=self.f_body_b,
                       fg_color=C_EXP, hover_color=C_EXP[1],
-                      command=self._save_as).pack(anchor="w", padx=12, pady=(12, 4))
+                      command=self._save_as).pack(anchor="e", padx=12, pady=(12, 4))
         ctk.CTkLabel(ec, text=f"v{VERSION}", text_color="gray", font=self.f_small).pack(
             anchor="e", padx=12, pady=(0, 12))
 
@@ -333,8 +370,19 @@ class App:
         return ent
 
     # ================= 预览：缩放 & 拖动 =================
+    def _on_wheel(self, event):
+        """鼠标滚轮：上滚放大、下滚缩小（Windows/macOS）。"""
+        self._wheel_zoom(1 if event.delta > 0 else -1)
+
+    def _wheel_zoom(self, direction: int):
+        if self._prev_pil is None:
+            return
+        factor = 1.15 if direction > 0 else 1 / 1.15
+        self._zoom = max(0.25, min(self._zoom * factor, 6.0))
+        self._apply_preview()
+
     def _zoom_in(self):
-        self._zoom = min(self._zoom * 1.25, 5.0)
+        self._zoom = min(self._zoom * 1.25, 6.0)
         self._apply_preview()
 
     def _zoom_out(self):

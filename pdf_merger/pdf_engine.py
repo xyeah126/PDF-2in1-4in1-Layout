@@ -82,7 +82,7 @@ def build_merged(file_paths, cfg: MergeConfig, log=None):
     return out
 
 
-def render_preview(file_paths, cfg: MergeConfig, target_w: int = 720, log=None) -> bytes:
+def render_preview(file_paths, cfg: MergeConfig, target_w: int = 1600, log=None) -> bytes:
     """低 DPI PNG bytes，供预览控件刷新。"""
     doc = build_merged(file_paths, cfg, log=log)
     try:

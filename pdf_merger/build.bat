@@ -15,5 +15,5 @@ python -m PyInstaller --noconfirm --distpath "%DIST%" build.spec
 if errorlevel 1 ( echo build failed & pause & exit /b 1 )
 
 echo.
-echo Done: %DIST%\PDFMerger.exe
+echo Done. Check %DIST% for PDFMerger_v*.exe
 pause

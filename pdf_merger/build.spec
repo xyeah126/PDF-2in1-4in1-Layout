@@ -1,9 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller 打包配置：单文件、无控制台窗口
-# 用法：pyinstaller build.spec  →  产物 dist/PDFMerger.exe
+# 用法：pyinstaller build.spec  →  产物 dist/PDFMerger_v<版本号>.exe
 import os
+import re
 
 import customtkinter
+
+# 从 version.py 读取版本号，让 exe 文件名自带版本
+with open("version.py", encoding="utf-8") as _f:
+    _VER = re.search(r'VERSION\s*=\s*"([^"]+)"', _f.read()).group(1)
+EXE_NAME = f"PDFMerger_v{_VER}"
 
 datas = [
     # customtkinter 主题资源必须随包
@@ -37,10 +43,10 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="PDFMerger",
+    name=EXE_NAME,
     onefile=True,
     console=False,         # 无控制台窗口（关键：EXE 只认 console，不认 windowed）
     upx=True,
     icon="app.ico",                 # 应用图标
-    version="version_info.txt",     # exe 属性显示 0.6.0.0
+    version="version_info.txt",     # exe 属性显示版本号
 )

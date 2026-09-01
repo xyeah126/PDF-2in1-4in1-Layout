@@ -172,28 +172,28 @@ class App:
                                   handlesize=10, opaqueresize=False)
         self.pan.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Pane 1：预览（60%）
+        # Pane 1：预览
         p1 = ctk.CTkFrame(self.pan, fg_color="transparent")
         self.pan.add(p1, minsize=300)
         self._build_preview(p1)
 
-        # Pane 2：中部三卡（20%）
+        # Pane 2：中部三卡
         p2 = ctk.CTkFrame(self.pan, fg_color="transparent")
         self.pan.add(p2, minsize=170)
         self._build_controls(p2)
 
-        # Pane 3：底部日志 + 导出（20%）
+        # Pane 3：底部日志 + 导出（minsize 留小，允许 16% 比例）
         p3 = ctk.CTkFrame(self.pan, fg_color="transparent")
-        self.pan.add(p3, minsize=150)
+        self.pan.add(p3, minsize=120)
         self._build_bottom(p3)
 
-        # 首次布局后把分隔条定位到 55%/25%/20%（预览/中部三卡/日志+导出）
+        # 首次布局后把分隔条定位到 57%/27%/16%（预览/中部三卡/日志+导出）
         # 之后用户可自行拖拽；连设两次防止布局未稳定时失效
         root.after(300, self._set_sashes)
         root.after(900, self._set_sashes)
 
     def _set_sashes(self):
-        """定位分隔条到 55%/25%/20%。
+        """定位分隔条到 57%/27%/16%。
 
         注意 tkinter 方法名随版本不同：
         Py3.14+ 为 sash_place(index,x,y)，旧版为 sashpos(index,y)。
@@ -203,7 +203,7 @@ class App:
             total = self.pan.winfo_height()
             if total <= 100:
                 return
-            y0, y1 = int(total * 0.55), int(total * 0.80)
+            y0, y1 = int(total * 0.57), int(total * 0.84)  # 预览 57%，中部 27%，底部 16%
             if hasattr(self.pan, "sash_place"):          # 垂直方向：x=0，y 定位
                 self.pan.sash_place(0, 0, y0)
                 self.pan.sash_place(1, 0, y1)

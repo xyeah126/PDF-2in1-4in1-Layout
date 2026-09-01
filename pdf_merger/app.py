@@ -1,7 +1,7 @@
 """UI 层：构建界面、绑定事件、主线程分发 bus 消息。
 
-按 v6 布局：预览(顶) → 输入文件/合并设置/页间距 三卡(中) → 日志+导出(底)。
-两项调整：图片 DPI 移入"合并设置"；导出卡只留"格式 + 另存为"。
+布局：预览(顶) → 输入文件/合并设置/页间距 三卡(中) → 日志+导出(底)。
+美化：微软雅黑加粗放大、按钮分色、卡片圆角、预览可缩放。
 """
 import io
 import os
@@ -18,8 +18,20 @@ from worker import Worker
 from version import VERSION
 import persistence
 
-# 预览显示区上限（像素），真实窗口可更大
-PREVIEW_W, PREVIEW_H = 520, 360
+# 字体
+FONT = "Microsoft YaHei"          # 微软雅黑
+FONT_MONO = "Consolas"            # 日志用清晰等宽字体
+
+# 预览显示区（像素），真实窗口可更大
+PREVIEW_W, PREVIEW_H = 560, 380
+
+# 按钮配色（light, dark）
+C_ADD = ("#16A34A", "#15803D")      # 添加文件 - 绿
+C_DEL = ("#DC2626", "#B91C1C")      # 删除 - 红
+C_NEU = ("#6B7280", "#4B5563")      # 移动/清空/缩放 - 灰
+C_EXP = ("#2563EB", "#1D4ED8")      # 导出 - 蓝
+C_CARD = ("gray95", "gray16")       # 卡片底色
+C_BORDER = ("gray80", "gray30")     # 卡片边框
 
 # 拖拽可选支持：导入失败则降级为按钮添加
 DND_ENABLED = False
@@ -32,10 +44,15 @@ except Exception:
 
 
 def _default_dir() -> str:
-    """默认导出目录：打包态指 exe 所在目录，开发态指脚本目录。"""
+    """默认目录：打包态指 exe 所在目录，开发态指脚本目录。"""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def _ori_short(ori: str) -> str:
+    """横向→横版，纵向→纵版。"""
+    return "横版" if ori == "横向" else "纵版"
 
 
 class App:
@@ -48,7 +65,18 @@ class App:
         self.sel = -1
         self._deb = None
         self._save_id = None
-        self._prev_image = None
+        self._prev_pil = None        # 预览原图（PIL）
+        self._prev_image = None      # 当前 CTkImage
+        self._zoom = 1.0             # 预览缩放倍率（1.0=适应区域）
+
+        # 字体实例（root 已存在，可安全创建）
+        self.f_title = ctk.CTkFont(family=FONT, size=15, weight="bold")
+        self.f_big = ctk.CTkFont(family=FONT, size=16, weight="bold")
+        self.f_body = ctk.CTkFont(family=FONT, size=14)
+        self.f_body_b = ctk.CTkFont(family=FONT, size=14, weight="bold")
+        self.f_meta = ctk.CTkFont(family=FONT, size=13)
+        self.f_small = ctk.CTkFont(family=FONT, size=12)
+        self.f_log = ctk.CTkFont(family=FONT_MONO, size=12)
 
         self._build_ui()
         # 记住上次设置：启动载入配置与文件列表
@@ -77,11 +105,11 @@ class App:
     def _build_ui(self):
         root = self.root
         root.title(f"PDF 单页合并器 v{VERSION}")
-        root.geometry("980x740")
-        root.minsize(820, 620)
+        root.geometry("1040x780")
+        root.minsize(920, 700)
 
         body = ctk.CTkFrame(root, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=12, pady=12)
+        body.pack(fill="both", expand=True, padx=14, pady=14)
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(0, weight=1)   # 预览可拉伸
         body.grid_rowconfigure(1, weight=0)
@@ -91,24 +119,40 @@ class App:
         self._build_controls(body)
         self._build_bottom(body)
 
+    def _card(self, parent, **kw):
+        """统一卡片样式：圆角 + 轻边框。"""
+        return ctk.CTkFrame(parent, fg_color=C_CARD, border_width=1,
+                            border_color=C_BORDER, corner_radius=14, **kw)
+
     def _build_preview(self, parent):
-        f = ctk.CTkFrame(parent)
+        f = self._card(parent)
         f.grid(row=0, column=0, sticky="nsew", pady=(0, 12))
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(1, weight=1)
 
         head = ctk.CTkFrame(f, fg_color="transparent")
-        head.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 6))
+        head.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
         head.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(head, text="合并预览",
-                     font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, sticky="w")
-        self.meta_var = ctk.StringVar(value="4合1 · A4 横向 · 2×2 · 间距 5/5mm")
-        ctk.CTkLabel(head, textvariable=self.meta_var,
-                     font=ctk.CTkFont(family="Courier", size=12)).grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(head, text="合并预览", font=self.f_big).grid(row=0, column=0, sticky="w")
+        self.meta_var = ctk.StringVar(value="4合1 · A4 横向 · 2×2 · 间距 10/10mm")
+        ctk.CTkLabel(head, textvariable=self.meta_var, font=self.f_meta).grid(row=0, column=1, sticky="e", padx=10)
+        # 缩放按钮
+        zb = ctk.CTkFrame(head, fg_color="transparent")
+        zb.grid(row=0, column=2, sticky="e")
+        ctk.CTkButton(zb, text="－", width=34, height=28, font=self.f_body_b,
+                      fg_color=C_NEU, hover_color=C_NEU[1],
+                      command=self._zoom_out).pack(side="left", padx=2)
+        ctk.CTkButton(zb, text="1:1", width=40, height=28, font=self.f_small,
+                      fg_color=C_NEU, hover_color=C_NEU[1],
+                      command=self._zoom_reset).pack(side="left", padx=2)
+        ctk.CTkButton(zb, text="＋", width=34, height=28, font=self.f_body_b,
+                      fg_color=C_NEU, hover_color=C_NEU[1],
+                      command=self._zoom_in).pack(side="left", padx=2)
 
         wrap = ctk.CTkFrame(f, fg_color="transparent")
-        wrap.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        self.preview_label = ctk.CTkLabel(wrap, text="（无文件）", text_color="gray")
+        wrap.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 12))
+        self.preview_label = ctk.CTkLabel(wrap, text="（无文件）", text_color="gray",
+                                          font=self.f_body)
         self.preview_label.pack(expand=True)
         if self.dnd_enabled:
             try:
@@ -124,43 +168,48 @@ class App:
         f.grid_columnconfigure(1, weight=1)
         f.grid_columnconfigure(2, weight=1)
 
-        # ---- 输入文件 ----
-        c1 = ctk.CTkFrame(f)
+        # ---- 输入文件（紧凑布局）----
+        c1 = self._card(f)
         c1.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        ctk.CTkLabel(c1, text="输入文件（单页 PDF）",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
-        self.file_box = ctk.CTkScrollableFrame(c1, height=150)
-        self.file_box.pack(fill="x", padx=10)
+        c1.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(c1, text="输入文件（单页 PDF）", font=self.f_title).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+        self.file_box = ctk.CTkScrollableFrame(c1, height=116)
+        self.file_box.grid(row=1, column=0, sticky="ew", padx=12)
+        # 工具栏：左 4 个小按钮，右 添加文件（同一行，省空间）
         tb = ctk.CTkFrame(c1, fg_color="transparent")
-        tb.pack(fill="x", padx=10, pady=6)
-        for txt, cmd in [("↑", lambda: self._move(-1)),
-                         ("↓", lambda: self._move(1)),
-                         ("✕", self._delete),
-                         ("清空", self._clear)]:
-            ctk.CTkButton(tb, text=txt, height=26,
-                          command=cmd).pack(side="left", expand=True, fill="x", padx=2)
-        add_txt = "＋ 添加文件" + (" / 拖拽到此" if self.dnd_enabled else "")
-        ctk.CTkButton(c1, text=add_txt, height=26,
-                      command=self._add_files).pack(fill="x", padx=10, pady=(0, 10))
+        tb.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 12))
+        tb.grid_columnconfigure(4, weight=1)
+        for col, (txt, cmd, col_) in enumerate([
+            ("↑", lambda: self._move(-1), C_NEU),
+            ("↓", lambda: self._move(1), C_NEU),
+            ("✕", self._delete, C_DEL),
+            ("清空", self._clear, C_NEU),
+        ]):
+            ctk.CTkButton(tb, text=txt, width=40, height=30, font=self.f_body_b,
+                          fg_color=col_, hover_color=col_[1],
+                          command=cmd).grid(row=0, column=col, padx=(0, 4))
+        add_txt = "＋ 添加文件" + (" / 拖拽" if self.dnd_enabled else "")
+        ctk.CTkButton(tb, text=add_txt, height=30, font=self.f_body_b,
+                      fg_color=C_ADD, hover_color=C_ADD[1],
+                      command=self._add_files).grid(row=0, column=4, sticky="ew", padx=(4, 0))
 
         # ---- 合并设置（含 DPI）----
-        c2 = ctk.CTkFrame(f)
+        c2 = self._card(f)
         c2.grid(row=0, column=1, sticky="nsew", padx=8)
-        ctk.CTkLabel(c2, text="合并设置",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        ctk.CTkLabel(c2, text="合并设置", font=self.f_title).pack(anchor="w", padx=12, pady=(12, 4))
         self.mode_seg = self._seg_row(c2, "模式", ["2合1", "4合1", "6合1", "8合1"], "4合1", self._on_cfg)
         self.page_seg = self._seg_row(c2, "页面", ["A4", "A3"], "A4", self._on_cfg)
         self.ori_seg = self._seg_row(c2, "方向", ["横向", "纵向"], "横向", self._on_cfg)
-        self.dpi_ent = self._entry_row(c2, "DPI", "150", self._on_cfg)
+        self.dpi_ent = self._entry_row(c2, "DPI", "200", self._on_cfg)
 
         # ---- 页间距 ----
-        c3 = ctk.CTkFrame(f)
+        c3 = self._card(f)
         c3.grid(row=0, column=2, sticky="nsew")
-        ctk.CTkLabel(c3, text="页间距",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
-        self.gap_h = self._entry_row(c3, "横向", "5", self._on_cfg, "mm")
-        self.gap_v = self._entry_row(c3, "纵向", "5", self._on_cfg, "mm")
-        self.margin = self._entry_row(c3, "外边距", "5", self._on_cfg, "mm")
+        ctk.CTkLabel(c3, text="页间距", font=self.f_title).pack(anchor="w", padx=12, pady=(12, 4))
+        self.gap_h = self._entry_row(c3, "横向", "10", self._on_cfg, "mm")
+        self.gap_v = self._entry_row(c3, "纵向", "10", self._on_cfg, "mm")
+        self.margin = self._entry_row(c3, "外边距", "10", self._on_cfg, "mm")
 
     def _build_bottom(self, parent):
         f = ctk.CTkFrame(parent, fg_color="transparent")
@@ -170,48 +219,71 @@ class App:
         f.grid_rowconfigure(0, weight=1)
 
         # ---- 日志 ----
-        lc = ctk.CTkFrame(f)
+        lc = self._card(f)
         lc.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        ctk.CTkLabel(lc, text="运行日志",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
-        self.log_box = ctk.CTkTextbox(lc, height=120,
-                                      font=ctk.CTkFont(family="Courier", size=12))
-        self.log_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        lc.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(lc, text="运行日志", font=self.f_title).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+        self.log_box = ctk.CTkTextbox(lc, height=120, font=self.f_log)
+        self.log_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         self.log_box.configure(state="disabled")
 
         # ---- 导出（格式 + 另存为）----
-        ec = ctk.CTkFrame(f)
+        ec = self._card(f)
         ec.grid(row=0, column=1, sticky="nsew")
-        ctk.CTkLabel(ec, text="导出",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        ctk.CTkLabel(ec, text="导出", font=self.f_title).pack(anchor="w", padx=12, pady=(12, 4))
         self.fmt_seg = self._seg_row(ec, "格式", ["PDF", "JPG", "PNG"], "PDF")
-        ctk.CTkButton(ec, text="另存为…", height=30,
-                      command=self._save_as).pack(fill="x", padx=10, pady=(10, 4))
-        ctk.CTkLabel(ec, text=f"v{VERSION}", text_color="gray",
-                     font=ctk.CTkFont(size=11)).pack(pady=(0, 10))
+        ctk.CTkButton(ec, text="另存为…", height=34, font=self.f_body_b,
+                      fg_color=C_EXP, hover_color=C_EXP[1],
+                      command=self._save_as).pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(ec, text=f"v{VERSION}", text_color="gray", font=self.f_small).pack(pady=(0, 12))
 
     # ---------- 通用行组件 ----------
     def _seg_row(self, parent, label, values, default, command=None):
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=4)
-        ctk.CTkLabel(row, text=label, width=46, anchor="w").pack(side="left")
-        seg = ctk.CTkSegmentedButton(row, values=values, command=command)
+        row.pack(fill="x", padx=12, pady=4)
+        ctk.CTkLabel(row, text=label, width=52, anchor="w", font=self.f_body).pack(side="left")
+        seg = ctk.CTkSegmentedButton(row, values=values, command=command, font=self.f_body)
         seg.set(default)
-        seg.pack(side="left", expand=True, fill="x", padx=(4, 0))
+        seg.pack(side="left", expand=True, fill="x", padx=(6, 0))
         return seg
 
     def _entry_row(self, parent, label, default, command, suffix=None):
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=4)
-        ctk.CTkLabel(row, text=label, width=46, anchor="w").pack(side="left")
+        row.pack(fill="x", padx=12, pady=4)
+        ctk.CTkLabel(row, text=label, width=52, anchor="w", font=self.f_body).pack(side="left")
         if suffix:
-            ctk.CTkLabel(row, text=suffix).pack(side="right", padx=(2, 4))
-        ent = ctk.CTkEntry(row, width=56, justify="center")
+            ctk.CTkLabel(row, text=suffix, font=self.f_body).pack(side="right", padx=(2, 4))
+        ent = ctk.CTkEntry(row, width=70, justify="center", font=self.f_body)
         ent.insert(0, default)
         ent.pack(side="right")
         ent.bind("<FocusOut>", lambda e: command())
         ent.bind("<Return>", lambda e: command())
         return ent
+
+    # ========== 预览缩放 ==========
+    def _zoom_in(self):
+        self._zoom = min(self._zoom * 1.25, 4.0)
+        self._apply_preview()
+
+    def _zoom_out(self):
+        self._zoom = max(self._zoom / 1.25, 0.25)
+        self._apply_preview()
+
+    def _zoom_reset(self):
+        self._zoom = 1.0
+        self._apply_preview()
+
+    def _apply_preview(self):
+        """按当前 _zoom 把 _prev_pil 渲染到预览控件。"""
+        if self._prev_pil is None:
+            return
+        w, h = self._prev_pil.size
+        fit = min(PREVIEW_W / w, PREVIEW_H / h)   # 适应区域的基准缩放
+        dw = max(1, int(w * fit * self._zoom))
+        dh = max(1, int(h * fit * self._zoom))
+        self._prev_image = ctk.CTkImage(light_image=self._prev_pil, size=(dw, dh))
+        self.preview_label.configure(image=self._prev_image, text="")
 
     # ========== 配置读取 ==========
     def _mode_int(self) -> int:
@@ -229,11 +301,11 @@ class App:
             mode=self._mode_int(),
             page_size=self.page_seg.get(),
             orientation=self.ori_seg.get(),
-            gap_h_mm=self._num(self.gap_h, 5),
-            gap_v_mm=self._num(self.gap_v, 5),
-            margin_mm=self._num(self.margin, 5),
+            gap_h_mm=self._num(self.gap_h, 10),
+            gap_v_mm=self._num(self.gap_v, 10),
+            margin_mm=self._num(self.margin, 10),
             export_format=self.fmt_seg.get().lower(),
-            dpi=int(self._num(self.dpi_ent, 150)),
+            dpi=int(self._num(self.dpi_ent, 200)),
         )
 
     def _update_meta(self):
@@ -276,8 +348,9 @@ class App:
             self._clear_preview()
 
     def _clear_preview(self):
-        self.preview_label.configure(image=None, text="（无文件）", text_color="gray")
+        self._prev_pil = None
         self._prev_image = None
+        self.preview_label.configure(image=None, text="（无文件）", text_color="gray")
 
     def _do_save(self):
         """防抖落盘：配置变更 600ms 后静默保存。"""
@@ -296,14 +369,15 @@ class App:
         for w in self.file_box.winfo_children():
             w.destroy()
         if not self.files:
-            ctk.CTkLabel(self.file_box, text="（无文件）", text_color="gray").pack(pady=10)
+            ctk.CTkLabel(self.file_box, text="（无文件）", text_color="gray",
+                         font=self.f_body).pack(pady=10)
             return
         for i, p in enumerate(self.files):
             title = f"{i + 1}. {os.path.basename(p)}"
             selected = (i == self.sel)
             btn = ctk.CTkButton(
-                self.file_box, text=title, anchor="w", height=24,
-                fg_color=("gray75", "gray25") if selected else "transparent",
+                self.file_box, text=title, anchor="w", height=28, font=self.f_body,
+                fg_color=("gray75", "gray30") if selected else "transparent",
                 text_color=("black", "white") if selected else None,
                 command=lambda i=i: self._select(i),
             )
@@ -316,7 +390,8 @@ class App:
     def _add_files(self):
         from tkinter import filedialog
         paths = filedialog.askopenfilenames(
-            title="选择单页 PDF", filetypes=[("PDF 文件", "*.pdf")]
+            title="选择单页 PDF", initialdir=_default_dir(),
+            filetypes=[("PDF 文件", "*.pdf")],
         )
         if not paths:
             return
@@ -382,14 +457,15 @@ class App:
         from tkinter import filedialog
         cfg = validate(self._cfg())
         ext = cfg.export_format
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"merged_{cfg.mode}in1_{cfg.page_size}{cfg.orientation[0]}_{ts}.{ext}"
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        name = f"{cfg.mode}张合并一张_{cfg.page_size}{_ori_short(cfg.orientation)}_{ts}.{ext}"
         path = filedialog.asksaveasfilename(
             title="导出到", initialdir=_default_dir(), initialfile=name,
             defaultextension=f".{ext}", filetypes=[(ext.upper(), f"*.{ext}")],
         )
         if not path:
             return
+        self._log(f"开始导出：{os.path.basename(path)}（{ext.upper()}）")
         self.worker.export(list(self.files), self._cfg(), path)
 
     # ========== bus handler（主线程）==========
@@ -398,12 +474,8 @@ class App:
 
     def _h_preview(self, png: bytes):
         try:
-            img = Image.open(io.BytesIO(png))
-            w, h = img.size
-            scale = min(PREVIEW_W / w, PREVIEW_H / h, 1.0)
-            dw, dh = max(int(w * scale), 1), max(int(h * scale), 1)
-            self._prev_image = ctk.CTkImage(light_image=img, size=(dw, dh))
-            self.preview_label.configure(image=self._prev_image, text="")
+            self._prev_pil = Image.open(io.BytesIO(png))
+            self._apply_preview()
         except Exception as e:
             self._log(f"预览渲染失败: {e}", "error")
 

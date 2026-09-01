@@ -9,6 +9,9 @@ from dataclasses import asdict
 
 from config import MergeConfig, validate
 
+# 设置版本：升版时用于把旧默认值迁移到新默认值
+SETTINGS_VERSION = 2
+
 
 def config_path() -> str:
     """配置文件路径。"""
@@ -37,6 +40,16 @@ def load() -> tuple[MergeConfig | None, list[str]]:
         cfg = validate(MergeConfig(**data.get("config", {})))
     except Exception:
         cfg = None
+    # 旧版设置迁移：把旧默认值（间距 5mm / DPI 150）升级到新默认（10mm / 200）
+    if cfg is not None and int(data.get("version", 0)) < SETTINGS_VERSION:
+        if cfg.gap_h_mm == 5.0:
+            cfg.gap_h_mm = 10.0
+        if cfg.gap_v_mm == 5.0:
+            cfg.gap_v_mm = 10.0
+        if cfg.margin_mm == 5.0:
+            cfg.margin_mm = 10.0
+        if cfg.dpi == 150:
+            cfg.dpi = 200
     files = [f for f in data.get("files", [])
              if isinstance(f, str) and os.path.exists(f)]
     return cfg, files
@@ -47,8 +60,9 @@ def save(cfg: MergeConfig, files: list[str]) -> None:
     try:
         with open(config_path(), "w", encoding="utf-8") as f:
             json.dump({
-                "config": asdict(validate(cfg)),
-                "files": list(files),
-            }, f, ensure_ascii=False, indent=2)
+            "version": SETTINGS_VERSION,
+            "config": asdict(validate(cfg)),
+            "files": list(files),
+        }, f, ensure_ascii=False, indent=2)
     except Exception:
         pass

@@ -10,11 +10,11 @@ class MergeConfig:
     mode: int = 4                 # 2 / 4 / 6 / 8
     page_size: str = "A4"         # "A4" | "A3"
     orientation: str = "横向"     # "横向" | "纵向"  → 输出页方向 + 网格行列
-    gap_h_mm: float = 5.0         # 列间距
-    gap_v_mm: float = 5.0         # 行间距
-    margin_mm: float = 5.0        # 外边距
+    gap_h_mm: float = 10.0        # 列间距
+    gap_v_mm: float = 10.0        # 行间距
+    margin_mm: float = 10.0       # 外边距
     export_format: str = "pdf"    # "pdf" | "jpg" | "png"
-    dpi: int = 150                # 仅 jpg / png 生效
+    dpi: int = 200                # 仅 jpg / png 生效（默认提高清晰度）
 
 
 # 页面尺寸（PDF 点，1pt = 1/72 inch），纵向基准

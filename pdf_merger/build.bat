@@ -1,19 +1,19 @@
 @echo off
 REM ============================================================
-REM  PDF 单页合并器  Windows 构建脚本
-REM  产物直出：S:\trae work\合并pdf排版程序app\PDFMerger.exe
+REM  PDF Merger build script
+REM  Output goes two levels up (..\..) = the project root folder
 REM ============================================================
 
-set DIST=S:\trae work\合并pdf排版程序app
+set DIST=..\..
 
-echo [1/2] 安装依赖...
+echo [1/2] Installing dependencies...
 python -m pip install -r requirements.txt
-if errorlevel 1 ( echo 依赖安装失败 & pause & exit /b 1 )
+if errorlevel 1 ( echo pip install failed & pause & exit /b 1 )
 
-echo [2/2] 构建 exe，输出到 %DIST%
+echo [2/2] Building exe, output to %DIST%
 python -m PyInstaller --noconfirm --distpath "%DIST%" build.spec
-if errorlevel 1 ( echo 构建失败 & pause & exit /b 1 )
+if errorlevel 1 ( echo build failed & pause & exit /b 1 )
 
 echo.
-echo 完成：%DIST%\PDFMerger.exe
+echo Done: %DIST%\PDFMerger.exe
 pause

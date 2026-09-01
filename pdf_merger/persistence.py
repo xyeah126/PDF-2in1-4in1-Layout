@@ -10,7 +10,9 @@ from dataclasses import asdict
 from config import MergeConfig, validate
 
 # 设置版本：升版时用于把旧默认值迁移到新默认值
-SETTINGS_VERSION = 2
+# v2: 间距 5mm → 10mm, DPI 150 → 200
+# v3: DPI 200 → 300
+SETTINGS_VERSION = 3
 
 
 def config_path() -> str:
@@ -40,8 +42,10 @@ def load() -> tuple[MergeConfig | None, list[str]]:
         cfg = validate(MergeConfig(**data.get("config", {})))
     except Exception:
         cfg = None
-    # 旧版设置迁移：把旧默认值（间距 5mm / DPI 150）升级到新默认（10mm / 200）
-    if cfg is not None and int(data.get("version", 0)) < SETTINGS_VERSION:
+    # 旧版设置迁移：把旧默认值升级到新版
+    ver = int(data.get("version", 0))
+    if cfg is not None and ver < SETTINGS_VERSION:
+        # v1→v2
         if cfg.gap_h_mm == 5.0:
             cfg.gap_h_mm = 10.0
         if cfg.gap_v_mm == 5.0:
@@ -50,6 +54,9 @@ def load() -> tuple[MergeConfig | None, list[str]]:
             cfg.margin_mm = 10.0
         if cfg.dpi == 150:
             cfg.dpi = 200
+        # v2→v3
+        if cfg.dpi == 200:
+            cfg.dpi = 300
     files = [f for f in data.get("files", [])
              if isinstance(f, str) and os.path.exists(f)]
     return cfg, files

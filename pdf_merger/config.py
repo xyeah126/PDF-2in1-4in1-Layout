@@ -14,7 +14,7 @@ class MergeConfig:
     gap_v_mm: float = 10.0        # 行间距
     margin_mm: float = 10.0       # 外边距
     export_format: str = "pdf"    # "pdf" | "jpg" | "png"
-    dpi: int = 200                # 仅 jpg / png 生效（默认提高清晰度）
+    dpi: int = 300                # 仅 jpg / png 生效（默认 300，清晰打印级）
 
 
 # 页面尺寸（PDF 点，1pt = 1/72 inch），纵向基准
@@ -52,5 +52,5 @@ def validate(cfg: MergeConfig) -> MergeConfig:
     cfg.gap_h_mm = clamp(float(cfg.gap_h_mm or 0), 0, 100)
     cfg.gap_v_mm = clamp(float(cfg.gap_v_mm or 0), 0, 100)
     cfg.margin_mm = clamp(float(cfg.margin_mm or 0), 0, 50)
-    cfg.dpi = int(clamp(int(cfg.dpi or 150), 72, 600))
+    cfg.dpi = int(clamp(int(cfg.dpi or 300), 72, 600))
     return cfg

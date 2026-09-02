@@ -1,0 +1,26 @@
+# === Python 缓存 ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
+# === PyInstaller 构建产物（Windows 用户本地 build 生成）===
+build/
+dist/
+*.spec.bak
+
+# === 发布 zip 包（作为 GitHub Release Assets 上传，不入库）===
+*.zip
+
+# === 用户本地持久化配置（个人设置/文件列表）===
+pdf_merger/pdf_merger_config.json
+
+# === IDE ===
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+customtkinter>=5.2
+PyMuPDF>=1.23
+pyinstaller>=6.0
+# 拖拽支持（可选；缺失自动降级为按钮添加）：
+# tkinterdnd2>=0.3
+
+# 开发/测试：
+pytest>=8.0
